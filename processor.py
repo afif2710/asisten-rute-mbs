@@ -1,0 +1,249 @@
+import pandas as pd
+import requests
+import json
+import urllib.parse
+import base64
+import io
+from PIL import Image
+
+# 1. HARDCODE TOKEN API & SHEET ID
+SYLOR_TOKEN = "sk-P4SsjGL7xtrxPSiNwC7uxaVzsm1pUgj69t6iD8frhWokWaDA" 
+SHEET_ID = "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w"
+TITIK_AWAL_MBS = "PT Mensa Bina Sukses Surabaya"
+
+def konversi_foto_ke_base64(image, max_dim=1024):
+    """Mengecilkan & mengubah foto ke Base64 string"""
+    img = image.copy()
+    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    buffered = io.BytesIO()
+    img.convert("RGB").save(buffered, format="JPEG", quality=85)
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+def bersihkan_angka(val):
+    """Pembersih Angka untuk Format Indonesia / US / Retur Minus"""
+    if pd.isna(val) or val is None:
+        return 0.0
+    s = str(val).strip()
+    if not s or s == '-' or s.lower() in ['nan', 'none']:
+        return 0.0
+
+    is_negative = False
+    if s.startswith('(') and s.endswith(')'):
+        is_negative = True
+        s = s[1:-1].strip()
+    elif s.endswith('-'):
+        is_negative = True
+        s = s[:-1].strip()
+    elif s.startswith('-'):
+        is_negative = True
+        s = s[1:].strip()
+
+    s = s.replace('Rp', '').replace(' ', '').strip()
+
+    if '.' in s and ',' in s:
+        if s.rfind('.') > s.rfind(','):
+            s = s.replace(',', '')
+        else:
+            s = s.replace('.', '').replace(',', '.')
+    elif ',' in s:
+        parts = s.split(',')
+        if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
+            s = s.replace(',', '')
+        else:
+            s = s.replace(',', '.')
+    elif '.' in s:
+        parts = s.split('.')
+        if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
+            s = s.replace('.', '')
+
+    try:
+        num = float(s)
+        return -num if is_negative else num
+    except ValueError:
+        return 0.0
+
+def load_data_from_google_sheets():
+    """Membaca data Alamat dan Histori dari Google Sheets"""
+    try:
+        base_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet="
+        s_histori = urllib.parse.quote("Data Histori Januari - Juli 2026")
+        s_alamat = urllib.parse.quote("Data Alamat Toko")
+
+        df_histori = pd.read_csv(base_url + s_histori, dtype=str)
+        df_alamat = pd.read_csv(base_url + s_alamat, dtype=str)
+
+        # Forward Fill sel toko yang digabung/kosong
+        cols_to_fill = df_histori.columns[:4]
+        df_histori[cols_to_fill] = df_histori[cols_to_fill].ffill()
+
+        return df_histori, df_alamat
+    except Exception as e:
+        print(f"Error Load Sheets: {e}")
+        return None, None
+
+def panggil_ai_vision(image):
+    """Memanggil Sylor API untuk membaca foto jadwal"""
+    base64_img = konversi_foto_ke_base64(image)
+    headers = {
+        "Authorization": f"Bearer {SYLOR_TOKEN.strip()}",
+        "Content-Type": "application/json"
+    }
+
+    prompt = """
+    Analisis foto jadwal harian ini.
+    Ekstrak semua Nama Toko atau Kode Toko yang tertera di lembar jadwal ini.
+    Kembalikan HANYA dalam format JSON valid seperti ini tanpa penjelasan atau markdown tambahan:
+    {
+        "toko_ditemukan": ["Toko A", "Toko B", "T-SUB-001"]
+    }
+    """
+
+    payload = {
+        "model": "gpt-5.4-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+                ]
+            }
+        ],
+        "temperature": 0.1
+    }
+
+    url = "https://api.sylorapi.com/v1/chat/completions"
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    
+    if response.status_code == 200:
+        res_data = response.json()
+        response_text = res_data["choices"][0]["message"]["content"]
+        clean_json = response_text.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(clean_json)
+        return parsed.get("toko_ditemukan", [])
+    else:
+        raise Exception(f"API Error ({response.status_code}): {response.text}")
+
+def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
+    """Proses utama pengecekan status keaktifan order 3 bulan & 7 bulan"""
+    hasil = []
+
+    df_a = df_alamat.copy()
+    df_h = df_histori.copy()
+
+    df_a.columns = df_a.columns.astype(str).str.strip().str.lower()
+    df_h.columns = df_h.columns.astype(str).str.strip().str.lower()
+
+    col_kode_alamat = next((c for c in df_a.columns if 'cust' in c or 'code' in c or 'kode' in c), df_a.columns[1])
+    col_nama_alamat = next((c for c in df_a.columns if 'nama' in c or 'customer' in c or 'toko' in c), df_a.columns[2])
+
+    col_kode_histori = next((c for c in df_h.columns if 'id' in c or 'kode' in c or 'cust' in c), df_h.columns[1])
+    col_nama_histori = next((c for c in df_h.columns if 'nama' in c or 'toko' in c), df_h.columns[2])
+    col_produk_histori = next((c for c in df_h.columns if 'produk' in c or 'item' in c), df_h.columns[4])
+
+    # Ambil kolom bulan (Januari - Juli)
+    sales_cols = [c for c in df_h.columns[5:] if not str(c).startswith('unnamed') and str(c).strip() != '']
+    month_cols = [c for c in sales_cols if 'grand' not in str(c).lower() and 'total' not in str(c).lower()]
+
+    for c in month_cols:
+        df_h[c] = df_h[c].apply(bersihkan_angka)
+
+    # Pisahkan 3 bulan terakhir (Mei, Jun, Jul) dan 4 bulan awal (Jan, Feb, Mar, Apr)
+    cols_3_bulan_terakhir = month_cols[-3:] if len(month_cols) >= 3 else month_cols
+    cols_4_bulan_awal = month_cols[:-3] if len(month_cols) > 3 else []
+
+    df_h['sum_3_bulan'] = df_h[cols_3_bulan_terakhir].sum(axis=1) if cols_3_bulan_terakhir else 0
+    df_h['sum_awal_tahun'] = df_h[cols_4_bulan_awal].sum(axis=1) if cols_4_bulan_awal else 0
+    df_h['sum_7_bulan'] = df_h[month_cols].sum(axis=1)
+
+    for _, toko in df_a.iterrows():
+        kode = str(toko[col_kode_alamat]).strip()
+        nama = str(toko[col_nama_alamat]).strip()
+        alamat = str(toko.get('alamat', '-')).strip()
+
+        wilayah = "Surabaya / Sekitar"
+        if "sidoarjo" in alamat.lower():
+            wilayah = "Sidoarjo"
+        elif "gresik" in alamat.lower():
+            wilayah = "Gresik"
+        elif "pasuruan" in alamat.lower():
+            wilayah = "Pasuruan"
+
+        is_match = any(
+            t.lower().strip() in kode.lower() or 
+            t.lower().strip() in nama.lower() or 
+            nama.lower() in t.lower().strip()
+            for t in list_toko_foto
+        )
+
+        if is_match:
+            match_kode = df_h[col_kode_histori].astype(str).str.strip().str.lower() == kode.lower()
+            match_nama = df_h[col_nama_histori].astype(str).str.strip().str.lower() == nama.lower()
+            tx_toko = df_h[match_kode | match_nama]
+
+            sum_3m = tx_toko['sum_3_bulan'].sum() if not tx_toko.empty else 0.0
+            sum_awal = tx_toko['sum_awal_tahun'].sum() if not tx_toko.empty else 0.0
+            sum_7m = tx_toko['sum_7_bulan'].sum() if not tx_toko.empty else 0.0
+
+            # --- LOGIKA STATUS EMOTICON ---
+            if sum_3m > 0 and sum_awal > 0:
+                status_label = "✅ Toko Ini Selalu Order (Jan - Jul 2026)"
+                detail_status = "3 Bulan Terakhir: ✅ | 7 Bulan Total: ✅"
+                rank_order = 1
+            elif sum_3m > 0 and sum_awal <= 0:
+                status_label = "⚡ Toko Ini Order dalam 3 Bulan Terakhir"
+                detail_status = "3 Bulan Terakhir: ✅ | 7 Bulan Total: ❌"
+                rank_order = 2
+            elif sum_3m <= 0 and sum_7m > 0:
+                status_label = "⚠️ Vakum (Pernah Order Awal Tahun, 3 Bulan Terakhir Kosong)"
+                detail_status = "3 Bulan Terakhir: ❌ | 7 Bulan Total: ✅"
+                rank_order = 3
+            else:
+                status_label = "❌ Tidak Pernah Order Tahun 2026"
+                detail_status = "3 Bulan Terakhir: ❌ | 7 Bulan Total: ❌"
+                rank_order = 4
+
+            # Daftar Nama Produk Terbanyak
+            produk_terbanyak = []
+            if not tx_toko.empty:
+                top_items = tx_toko.sort_values(by='sum_7_bulan', ascending=False).dropna(subset=[col_produk_histori])
+                for _, item in top_items.iterrows():
+                    p_nama = str(item[col_produk_histori]).strip()
+                    p_total = item['sum_7_bulan']
+                    if p_total > 0 and p_nama not in produk_terbanyak:
+                        produk_terbanyak.append(p_nama)
+
+            # Link Google Maps
+            query_maps = urllib.parse.quote(f"{nama}, {alamat}")
+            maps_single_url = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
+
+            hasil.append({
+                "kode": kode,
+                "nama": nama,
+                "wilayah": wilayah,
+                "alamat": alamat,
+                "status_label": status_label,
+                "detail_status": detail_status,
+                "rank_order": rank_order,
+                "produk_terbanyak": produk_terbanyak,
+                "maps_url": maps_single_url
+            })
+
+    # Urutkan berdasarkan Wilayah, lalu Prioritas Keaktifan Order
+    hasil.sort(key=lambda x: (x['wilayah'], x['rank_order']))
+
+    # Link Google Maps Gabungan
+    rute_maps_full = ""
+    if hasil:
+        origin = urllib.parse.quote(TITIK_AWAL_MBS)
+        destination = urllib.parse.quote(f"{hasil[-1]['nama']}, {hasil[-1]['alamat']}")
+        
+        waypoints_list = [urllib.parse.quote(f"{t['nama']}, {t['alamat']}") for t in hasil[:-1]]
+        waypoints = "|".join(waypoints_list)
+        
+        if waypoints:
+            rute_maps_full = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
+        else:
+            rute_maps_full = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}"
+
+    return hasil, rute_maps_full
