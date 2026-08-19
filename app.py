@@ -2,22 +2,18 @@ import streamlit as st
 from PIL import Image
 from processor import load_data_from_google_sheets, panggil_ai_vision, proses_rute_dan_histori
 
-# Setup Halaman Streamlit
 st.set_page_config(page_title="Asisten Kunjungan Toko MBS", layout="wide", page_icon="🚚")
 st.title("🚚 Asisten Rute & Status Kunjungan Toko")
 
-# --- SIDEBAR ---
 st.sidebar.header("⚙️ Pengaturan Tampilan")
 sembunyikan_nol = st.sidebar.checkbox("Sembunyikan Toko Tanpa Order (7 Bulan Kosong)", value=False)
 
-# Load Data dari Backend
 st.cache_data.clear()
 df_histori, df_alamat = load_data_from_google_sheets()
 
 if df_alamat is not None:
     st.sidebar.success("✅ Database Google Sheets Terhubung!")
 
-# --- TAMPILKAN APLIKASI ---
 st.subheader("📸 Upload Foto Jadwal Kunjungan Harian")
 uploaded_file = st.file_uploader("Pilih foto jadwal harian...", type=["jpg", "jpeg", "png"])
 
@@ -26,16 +22,13 @@ if uploaded_file:
     st.image(image, caption="Foto Jadwal Terupload", use_container_width=True)
 
     if st.button("🚀 Proses Jadwal & Buat Rute Maps"):
-        with st.spinner("AI sedang membaca foto dan mengecek status histori order..."):
+        with st.spinner("AI sedang membaca foto, menyusun rute & menghitung jarak dari PT MBS..."):
             try:
-                # 1. Panggil AI Vision
                 list_toko_foto = panggil_ai_vision(image)
                 st.info(f"🔍 **Toko Terdeteksi di Foto oleh AI:** {', '.join(list_toko_foto)}")
 
-                # 2. Olah Data Rute
                 hasil_rekomendasi, rute_maps_full = proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat)
 
-                # 3. Tombol Rute Navigasi Google Maps Gabungan
                 if rute_maps_full:
                     st.markdown(f"""
                     <a href="{rute_maps_full}" target="_blank">
@@ -46,24 +39,23 @@ if uploaded_file:
                     """, unsafe_allow_html=True)
                     st.write("")
 
-                # 4. Tampilkan List Toko & Status Order
-                st.subheader("📍 Urutan Kunjungan Toko & Status Keaktifan")
+                st.subheader("📍 Urutan Kunjungan Toko (Diurutkan dari Jarak Terdekat)")
 
                 if not hasil_rekomendasi:
                     st.warning("Data toko terdeteksi, namun tidak ditemukan kecocokan pada Data Alamat Toko.")
                 else:
                     for idx, res in enumerate(hasil_rekomendasi, 1):
-                        # Filter sembunyikan jika tidak pernah order
                         if sembunyikan_nol and "Tidak Pernah Order" in res['status_label']:
                             continue
 
-                        with st.expander(f"#{idx} [{res['wilayah']}] {res['nama']} ({res['kode']}) — {res['status_label']}", expanded=True):
+                        with st.expander(f"#{idx} [{res['wilayah']}] {res['nama']} — 📏 {res['txt_jarak']}", expanded=True):
                             col1, col2 = st.columns([3, 1])
                             
                             with col1:
                                 st.write(f"🏢 **Area / Kota:** {res['wilayah']}")
                                 st.write(f"📍 **Alamat:** {res['alamat']}")
-                                st.markdown(f"📊 **Status Keaktifan:** `{res['detail_status']}`")
+                                st.write(f"📏 **Estimasi Jarak dari Start (PT MBS):** `{res['txt_jarak']}`")
+                                st.markdown(f"📊 **Status Order:** {res['status_label']}")
 
                             with col2:
                                 st.markdown(f"[📍 Buka Lokasi Toko Ini]({res['maps_url']})")

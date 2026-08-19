@@ -1,18 +1,48 @@
+from PIL import Image
 import pandas as pd
 import requests
 import json
 import urllib.parse
 import base64
-import io
-from PIL import Image
+import io   
+from geopy.geocoders import Nominatim
+from geopy.distance import geodesic
 
-# 1. HARDCODE TOKEN API & SHEET ID
-SYLOR_TOKEN = "sk-P4SsjGL7xtrxPSiNwC7uxaVzsm1pUgj69t6iD8frhWokWaDA" 
+# 1. KONFIGURASI NAMA MODEL, API KEY & SHEET ID
+MODEL_AI = "deepseek-chat"  # Ubah ke "claude-3-opus" atau "deepseek-chat" sesuai petunjuk Sylor API
+SYLOR_TOKEN = "sk-P4SsjGL7xtrxPSiNwC7uxaVzm1pUgj69t6iD8frhWokWaDA" 
 SHEET_ID = "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w"
 TITIK_AWAL_MBS = "PT Mensa Bina Sukses Surabaya"
 
+# Inisialisasi Geolocator untuk Hitung Jarak
+geolocator = Nominatim(user_agent="mbs_route_app_v2")
+
+def get_koordinat_mbs():
+    """Mengambil koordinat PT Mensa Bina Sukses"""
+    try:
+        loc = geolocator.geocode(TITIK_AWAL_MBS, timeout=5)
+        if loc:
+            return (loc.latitude, loc.longitude)
+    except:
+        pass
+    # Default Koordinat Surabaya (Margomulyo/Surabaya) jika geocode timeout
+    return (-7.2600, 112.7200)
+
+COORD_MBS = get_koordinat_mbs()
+
+def hitung_jarak_km(alamat_toko):
+    """Menghitung perkiraan jarak (km) dari PT MBS ke Alamat Toko"""
+    try:
+        loc = geolocator.geocode(f"{alamat_toko}, Jawa Timur", timeout=3)
+        if loc:
+            coord_toko = (loc.latitude, loc.longitude)
+            jarak = geodesic(COORD_MBS, coord_toko).km
+            return round(jarak, 1)
+    except:
+        pass
+    return None
+
 def konversi_foto_ke_base64(image, max_dim=1024):
-    """Mengecilkan & mengubah foto ke Base64 string"""
     img = image.copy()
     img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
     buffered = io.BytesIO()
@@ -20,7 +50,6 @@ def konversi_foto_ke_base64(image, max_dim=1024):
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 def bersihkan_angka(val):
-    """Pembersih Angka untuk Format Indonesia / US / Retur Minus"""
     if pd.isna(val) or val is None:
         return 0.0
     s = str(val).strip()
@@ -63,7 +92,6 @@ def bersihkan_angka(val):
         return 0.0
 
 def load_data_from_google_sheets():
-    """Membaca data Alamat dan Histori dari Google Sheets"""
     try:
         base_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet="
         s_histori = urllib.parse.quote("Data Histori Januari - Juli 2026")
@@ -72,7 +100,6 @@ def load_data_from_google_sheets():
         df_histori = pd.read_csv(base_url + s_histori, dtype=str)
         df_alamat = pd.read_csv(base_url + s_alamat, dtype=str)
 
-        # Forward Fill sel toko yang digabung/kosong
         cols_to_fill = df_histori.columns[:4]
         df_histori[cols_to_fill] = df_histori[cols_to_fill].ffill()
 
@@ -82,7 +109,6 @@ def load_data_from_google_sheets():
         return None, None
 
 def panggil_ai_vision(image):
-    """Memanggil Sylor API untuk membaca foto jadwal"""
     base64_img = konversi_foto_ke_base64(image)
     headers = {
         "Authorization": f"Bearer {SYLOR_TOKEN.strip()}",
@@ -99,7 +125,7 @@ def panggil_ai_vision(image):
     """
 
     payload = {
-        "model": "gpt-5.4-mini",
+        "model": MODEL_AI,  # Memakai model pengganti (deepseek-chat / claude-3-opus)
         "messages": [
             {
                 "role": "user",
@@ -125,7 +151,6 @@ def panggil_ai_vision(image):
         raise Exception(f"API Error ({response.status_code}): {response.text}")
 
 def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
-    """Proses utama pengecekan status keaktifan order 3 bulan & 7 bulan"""
     hasil = []
 
     df_a = df_alamat.copy()
@@ -141,14 +166,12 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
     col_nama_histori = next((c for c in df_h.columns if 'nama' in c or 'toko' in c), df_h.columns[2])
     col_produk_histori = next((c for c in df_h.columns if 'produk' in c or 'item' in c), df_h.columns[4])
 
-    # Ambil kolom bulan (Januari - Juli)
     sales_cols = [c for c in df_h.columns[5:] if not str(c).startswith('unnamed') and str(c).strip() != '']
     month_cols = [c for c in sales_cols if 'grand' not in str(c).lower() and 'total' not in str(c).lower()]
 
     for c in month_cols:
         df_h[c] = df_h[c].apply(bersihkan_angka)
 
-    # Pisahkan 3 bulan terakhir (Mei, Jun, Jul) dan 4 bulan awal (Jan, Feb, Mar, Apr)
     cols_3_bulan_terakhir = month_cols[-3:] if len(month_cols) >= 3 else month_cols
     cols_4_bulan_awal = month_cols[:-3] if len(month_cols) > 3 else []
 
@@ -185,7 +208,6 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
             sum_awal = tx_toko['sum_awal_tahun'].sum() if not tx_toko.empty else 0.0
             sum_7m = tx_toko['sum_7_bulan'].sum() if not tx_toko.empty else 0.0
 
-            # --- LOGIKA STATUS EMOTICON ---
             if sum_3m > 0 and sum_awal > 0:
                 status_label = "✅ Toko Ini Selalu Order (Jan - Jul 2026)"
                 detail_status = "3 Bulan Terakhir: ✅ | 7 Bulan Total: ✅"
@@ -203,7 +225,6 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                 detail_status = "3 Bulan Terakhir: ❌ | 7 Bulan Total: ❌"
                 rank_order = 4
 
-            # Daftar Nama Produk Terbanyak
             produk_terbanyak = []
             if not tx_toko.empty:
                 top_items = tx_toko.sort_values(by='sum_7_bulan', ascending=False).dropna(subset=[col_produk_histori])
@@ -213,7 +234,10 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                     if p_total > 0 and p_nama not in produk_terbanyak:
                         produk_terbanyak.append(p_nama)
 
-            # Link Google Maps
+            # Hitung Jarak (km) dari PT MBS
+            jarak_km = hitung_jarak_km(alamat)
+            txt_jarak = f"{jarak_km} km dari PT MBS" if jarak_km is not None else "Jarak Lihat di Maps"
+
             query_maps = urllib.parse.quote(f"{nama}, {alamat}")
             maps_single_url = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
 
@@ -225,12 +249,14 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                 "status_label": status_label,
                 "detail_status": detail_status,
                 "rank_order": rank_order,
+                "jarak_km": jarak_km if jarak_km is not None else 999.0,
+                "txt_jarak": txt_jarak,
                 "produk_terbanyak": produk_terbanyak,
                 "maps_url": maps_single_url
             })
 
-    # Urutkan berdasarkan Wilayah, lalu Prioritas Keaktifan Order
-    hasil.sort(key=lambda x: (x['wilayah'], x['rank_order']))
+    # Urutkan berdasarkan Wilayah, lalu Jarak Terdekat dari PT MBS
+    hasil.sort(key=lambda x: (x['wilayah'], x['jarak_km'], x['rank_order']))
 
     # Link Google Maps Gabungan
     rute_maps_full = ""
