@@ -39,7 +39,7 @@ if uploaded_file:
                     """, unsafe_allow_html=True)
                     st.write("")
 
-                st.subheader("📍 Urutan Kunjungan Toko (Diurutkan dari Jarak Terdekat)")
+                st.subheader("📍 Rute Call Plan Hari Ini (Diurutkan dari Jarak Terdekat)")
 
                 if not hasil_rekomendasi:
                     st.warning("Data toko terdeteksi, namun tidak ditemukan kecocokan pada Data Alamat Toko.")
@@ -56,6 +56,10 @@ if uploaded_file:
                                 st.write(f"📍 **Alamat:** {res['alamat']}")
                                 st.write(f"📏 **Estimasi Jarak dari Start (PT MBS):** `{res['txt_jarak']}`")
                                 st.markdown(f"📊 **Status Order:** {res['status_label']}")
+                                
+                                # Tampilkan Catatan / NOTE jika ada
+                                if res.get('catatan'):
+                                    st.error(f"📌 **CATATAN TOKO:** {res['catatan']}")
 
                             with col2:
                                 st.markdown(f"[📍 Buka Lokasi Toko Ini]({res['maps_url']})")

@@ -30,7 +30,6 @@ def bersihkan_alamat_untuk_maps(alamat):
     if not alamat:
         return ""
     a = str(alamat).upper()
-    # Buang nomor telepon dan kode negara ID-INDONESIA
     a = re.sub(r'TELP\.?\s*\(?\d+\)?[\d\s\-]*', '', a)
     a = re.sub(r'ID-INDONESIA', '', a)
     a = re.sub(r'BLOK\s+[A-Z0-9\-]+', '', a)
@@ -44,11 +43,9 @@ def hitung_jarak_km(alamat_toko, nama_toko=""):
     try:
         alamat_clean = bersihkan_alamat_untuk_maps(alamat_toko)
         
-        # Opsi 1: Cari Alamat Bersih + Jawa Timur
         query_1 = f"{alamat_clean}, Jawa Timur"
         loc = geolocator.geocode(query_1, timeout=3)
 
-        # Opsi 2: Jika tidak ketemu, cari berdasarkan Nama Toko + Jawa Timur
         if not loc:
             query_2 = f"{nama_toko}, Jawa Timur"
             loc = geolocator.geocode(query_2, timeout=3)
@@ -209,6 +206,13 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
         nama = str(toko[col_nama_alamat]).strip()
         alamat = str(toko.get('alamat', '-')).strip()
 
+        # Ambil Catatan / NOTE dari Kolom Google Sheets
+        raw_note = str(toko.get('note', '')).strip()
+        if raw_note.lower() in ['nan', 'none', 'n/a', '']:
+            catatan = ""
+        else:
+            catatan = raw_note
+
         wilayah = "Surabaya / Sekitar"
         if "sidoarjo" in alamat.lower():
             wilayah = "Sidoarjo"
@@ -271,6 +275,7 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                 "nama": nama,
                 "wilayah": wilayah,
                 "alamat": alamat,
+                "catatan": catatan,
                 "status_label": status_label,
                 "detail_status": detail_status,
                 "rank_order": rank_order,
