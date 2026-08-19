@@ -12,23 +12,27 @@ from geopy.distance import geodesic
 # ==========================================
 # 1. KONFIGURASI MODEL, TOKEN & SHEET ID
 # ==========================================
-MODEL_AI = "claude-opus-4-6"  # Menggunakan Claude Opus
-SYLOR_TOKEN = "sk-gnUcoUOQnGcQFgjjiV67FO4Xo179XujuW4FP0xQzRoE8i1Xc"  # Pastikan token ini aktif
+MODEL_AI = "claude-opus-4-6"
+SYLOR_TOKEN = "sk-gnUcoUOQnGcQFgjjiV67FO4Xo179XujuW4FP0xQzRoE8i1Xc"
 SHEET_ID = "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w"
-TITIK_AWAL_MBS = "PT Mensa Bina Sukses Surabaya"
+TITIK_AWAL_MBS = "PT Mensa Bina Sukses Waru Sidoarjo"
 
-# Inisialisasi Geolocator & Koordinat Presisi PT MBS Surabaya (Tandes / Margomulyo)
-geolocator = Nominatim(user_agent="mbs_route_app_v2")
-COORD_MBS = (-7.2588, 112.6711)
+# Titik Koordinat Resmi PT Mensa Bina Sukses (Area Waru / Sidoarjo)
+COORD_MBS = (-7.3528, 112.7239)
+
+geolocator = Nominatim(user_agent="mbs_route_app_v3")
 
 # ==========================================
 # 2. FUNGSI PEMBERSIH ALAMAT & HITUNG JARAK
 # ==========================================
 def bersihkan_alamat_untuk_maps(alamat):
-    """Membersihkan nomor blok/RT/RW yang membuat pencarian peta bingung"""
+    """Pembersih super tajam untuk membuang Telp, ID-INDONESIA, Blok, dll"""
     if not alamat:
         return ""
     a = str(alamat).upper()
+    # Buang nomor telepon dan kode negara ID-INDONESIA
+    a = re.sub(r'TELP\.?\s*\(?\d+\)?[\d\s\-]*', '', a)
+    a = re.sub(r'ID-INDONESIA', '', a)
     a = re.sub(r'BLOK\s+[A-Z0-9\-]+', '', a)
     a = re.sub(r'NO\.\s*\d+', '', a)
     a = re.sub(r'\d{3}/\d{3}', '', a)
@@ -36,16 +40,17 @@ def bersihkan_alamat_untuk_maps(alamat):
     return a.strip()
 
 def hitung_jarak_km(alamat_toko, nama_toko=""):
-    """Menghitung akurat jarak (km) dari PT MBS ke lokasi Toko"""
+    """Menghitung akurat jarak (km) dari PT MBS Waru ke lokasi Toko"""
     try:
-        # Opsi 1: Cari berdasarkan Nama Toko + Kota Surabaya
-        query_1 = f"{nama_toko}, Surabaya"
+        alamat_clean = bersihkan_alamat_untuk_maps(alamat_toko)
+        
+        # Opsi 1: Cari Alamat Bersih + Jawa Timur
+        query_1 = f"{alamat_clean}, Jawa Timur"
         loc = geolocator.geocode(query_1, timeout=3)
 
-        # Opsi 2: Jika tidak ketemu, cari berdasarkan alamat yang disederhanakan
+        # Opsi 2: Jika tidak ketemu, cari berdasarkan Nama Toko + Jawa Timur
         if not loc:
-            alamat_clean = bersihkan_alamat_untuk_maps(alamat_toko)
-            query_2 = f"{alamat_clean}, Jawa Timur"
+            query_2 = f"{nama_toko}, Jawa Timur"
             loc = geolocator.geocode(query_2, timeout=3)
 
         if loc:
@@ -254,9 +259,9 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                     if p_total > 0 and p_nama not in produk_terbanyak:
                         produk_terbanyak.append(p_nama)
 
-            # Hitung Jarak (km) dari PT MBS
+            # Hitung Jarak (km) dari PT MBS Waru
             jarak_km = hitung_jarak_km(alamat, nama)
-            txt_jarak = f"{jarak_km} km dari PT MBS" if jarak_km is not None else "Jarak Lihat di Maps"
+            txt_jarak = f"{jarak_km} km dari PT MBS Waru" if jarak_km is not None else "Jarak Lihat di Maps"
 
             query_maps = urllib.parse.quote(f"{nama}, {alamat}")
             maps_single_url = f"https://www.google.com/maps/search/?api=1&query={query_maps}"
@@ -275,8 +280,8 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                 "maps_url": maps_single_url
             })
 
-    # Urutkan berdasarkan Wilayah, lalu Jarak Terdekat dari PT MBS
-    hasil.sort(key=lambda x: (x['wilayah'], x['jarak_km'], x['rank_order']))
+    # MURNI URUTKAN BERDASARKAN JARAK TERDEKAT (KM) DARI PT MBS WARU
+    hasil.sort(key=lambda x: x['jarak_km'])
 
     # Link Google Maps Gabungan
     rute_maps_full = ""
