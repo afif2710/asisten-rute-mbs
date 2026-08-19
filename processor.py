@@ -4,36 +4,50 @@ import requests
 import json
 import urllib.parse
 import base64
-import io   
+import io
+import re
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 
-# 1. KONFIGURASI NAMA MODEL, API KEY & SHEET ID
-MODEL_AI = "claude-opus-4-6"  # Ubah ke "claude-3-opus" atau "deepseek-chat" sesuai petunjuk Sylor API
-SYLOR_TOKEN = "sk-gnUcoUOQnGcQFgjjiV67FO4Xo179XujuW4FP0xQzRoE8i1Xc" 
+# ==========================================
+# 1. KONFIGURASI MODEL, TOKEN & SHEET ID
+# ==========================================
+MODEL_AI = "claude-opus-4-6"  # Menggunakan Claude Opus
+SYLOR_TOKEN = "sk-gnUcoUOQnGcQFgjjiV67FO4Xo179XujuW4FP0xQzRoE8i1Xc"  # Pastikan token ini aktif
 SHEET_ID = "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w"
 TITIK_AWAL_MBS = "PT Mensa Bina Sukses Surabaya"
 
-# Inisialisasi Geolocator untuk Hitung Jarak
+# Inisialisasi Geolocator & Koordinat Presisi PT MBS Surabaya (Tandes / Margomulyo)
 geolocator = Nominatim(user_agent="mbs_route_app_v2")
+COORD_MBS = (-7.2588, 112.6711)
 
-def get_koordinat_mbs():
-    """Mengambil koordinat PT Mensa Bina Sukses"""
+# ==========================================
+# 2. FUNGSI PEMBERSIH ALAMAT & HITUNG JARAK
+# ==========================================
+def bersihkan_alamat_untuk_maps(alamat):
+    """Membersihkan nomor blok/RT/RW yang membuat pencarian peta bingung"""
+    if not alamat:
+        return ""
+    a = str(alamat).upper()
+    a = re.sub(r'BLOK\s+[A-Z0-9\-]+', '', a)
+    a = re.sub(r'NO\.\s*\d+', '', a)
+    a = re.sub(r'\d{3}/\d{3}', '', a)
+    a = a.replace("PERGUDANGAN", "").replace("JL.", "").replace("JALAN", "").replace("—", "")
+    return a.strip()
+
+def hitung_jarak_km(alamat_toko, nama_toko=""):
+    """Menghitung akurat jarak (km) dari PT MBS ke lokasi Toko"""
     try:
-        loc = geolocator.geocode(TITIK_AWAL_MBS, timeout=5)
-        if loc:
-            return (loc.latitude, loc.longitude)
-    except:
-        pass
-    # Default Koordinat Surabaya (Margomulyo/Surabaya) jika geocode timeout
-    return (-7.2600, 112.7200)
+        # Opsi 1: Cari berdasarkan Nama Toko + Kota Surabaya
+        query_1 = f"{nama_toko}, Surabaya"
+        loc = geolocator.geocode(query_1, timeout=3)
 
-COORD_MBS = get_koordinat_mbs()
+        # Opsi 2: Jika tidak ketemu, cari berdasarkan alamat yang disederhanakan
+        if not loc:
+            alamat_clean = bersihkan_alamat_untuk_maps(alamat_toko)
+            query_2 = f"{alamat_clean}, Jawa Timur"
+            loc = geolocator.geocode(query_2, timeout=3)
 
-def hitung_jarak_km(alamat_toko):
-    """Menghitung perkiraan jarak (km) dari PT MBS ke Alamat Toko"""
-    try:
-        loc = geolocator.geocode(f"{alamat_toko}, Jawa Timur", timeout=3)
         if loc:
             coord_toko = (loc.latitude, loc.longitude)
             jarak = geodesic(COORD_MBS, coord_toko).km
@@ -42,6 +56,9 @@ def hitung_jarak_km(alamat_toko):
         pass
     return None
 
+# ==========================================
+# 3. FUNGSI PEMROSESAN GAMBAR & DATA
+# ==========================================
 def konversi_foto_ke_base64(image, max_dim=1024):
     img = image.copy()
     img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
@@ -125,7 +142,7 @@ def panggil_ai_vision(image):
     """
 
     payload = {
-        "model": MODEL_AI,  # Memakai model pengganti (deepseek-chat / claude-3-opus)
+        "model": MODEL_AI,
         "messages": [
             {
                 "role": "user",
@@ -150,6 +167,9 @@ def panggil_ai_vision(image):
     else:
         raise Exception(f"API Error ({response.status_code}): {response.text}")
 
+# ==========================================
+# 4. FUNGSI LOGIKA RUTE & HISTORI
+# ==========================================
 def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
     hasil = []
 
@@ -235,7 +255,7 @@ def proses_rute_dan_histori(list_toko_foto, df_histori, df_alamat):
                         produk_terbanyak.append(p_nama)
 
             # Hitung Jarak (km) dari PT MBS
-            jarak_km = hitung_jarak_km(alamat)
+            jarak_km = hitung_jarak_km(alamat, nama)
             txt_jarak = f"{jarak_km} km dari PT MBS" if jarak_km is not None else "Jarak Lihat di Maps"
 
             query_maps = urllib.parse.quote(f"{nama}, {alamat}")
