@@ -9,8 +9,8 @@ from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 
 # 1. KONFIGURASI NAMA MODEL, API KEY & SHEET ID
-MODEL_AI = "deepseek-chat"  # Ubah ke "claude-3-opus" atau "deepseek-chat" sesuai petunjuk Sylor API
-SYLOR_TOKEN = "sk-P4SsjGL7xtrxPSiNwC7uxaVzm1pUgj69t6iD8frhWokWaDA" 
+MODEL_AI = "claude-opus-4-6"  # Ubah ke "claude-3-opus" atau "deepseek-chat" sesuai petunjuk Sylor API
+SYLOR_TOKEN = "sk-gnUcoUOQnGcQFgjjiV67FO4Xo179XujuW4FP0xQzRoE8i1Xc" 
 SHEET_ID = "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w"
 TITIK_AWAL_MBS = "PT Mensa Bina Sukses Surabaya"
 
