@@ -2,12 +2,13 @@ import streamlit as st
 from PIL import Image
 from processor import load_data_from_google_sheets, panggil_ai_vision, proses_rute_dan_histori
 
-# Konfigurasi Halaman Web
 st.set_page_config(page_title="Asisten MBS", layout="wide", page_icon="🚚")
 
-# Load Data Google Sheets
-st.cache_data.clear()
-df_histori, df_alamat = load_data_from_google_sheets()
+# MAPS ID SPREADSHEET SESUAI KODE RUTE
+MAP_SPREADSHEET = {
+    "RS CP-08": "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w",
+    "RS CP-X4": "1nlq4NqvDj2_VLtHIHnzx8S7B4T6q9aWDT_Ts6RO8iEw"
+}
 
 # ==========================================
 # NAVIGASI MENU UTAMA
@@ -17,10 +18,6 @@ menu_pilihan = st.sidebar.radio(
     "Pilih Fitur / Layanan:",
     ["1. Asisten Kunjungan & Data Histori", "2. Penghitungan Total Hari Ini"]
 )
-
-# Indikator Koneksi Google Sheets di Sidebar
-if df_alamat is not None:
-    st.sidebar.success("✅ Database Google Sheets Terhubung!")
 
 # ==========================================
 # MENU 1: ASISTEN KUNJUNGAN & DATA HISTORI
@@ -32,8 +29,17 @@ if menu_pilihan == "1. Asisten Kunjungan & Data Histori":
     # Sub-Menu Pilihan Kode Rute
     rute_pilihan = st.selectbox(
         "📍 Pilih Kode Rute / Call Plan:",
-        ["RS CP-08"]  # Nantinya tinggal tambahkan rute lain di sini (misal: "RS CP-09", "RS CP-10")
+        list(MAP_SPREADSHEET.keys())
     )
+
+    # Ambil Sheet ID yang sesuai rute yang dipilih
+    active_sheet_id = MAP_SPREADSHEET[rute_pilihan]
+
+    st.cache_data.clear()
+    df_histori, df_alamat = load_data_from_google_sheets(active_sheet_id)
+
+    if df_alamat is not None:
+        st.sidebar.success(f"✅ Database Rute `{rute_pilihan}` Terhubung!")
 
     st.markdown("---")
     st.sidebar.header("⚙️ Pengaturan Tampilan")
@@ -47,7 +53,7 @@ if menu_pilihan == "1. Asisten Kunjungan & Data Histori":
         st.image(image, caption=f"Foto Jadwal Terupload - Rute {rute_pilihan}", use_container_width=True)
 
         if st.button("🚀 Proses Jadwal & Buat Rute Maps"):
-            with st.spinner("AI sedang membaca foto, menyusun rute & menghitung jarak dari PT MBS Waru..."):
+            with st.spinner(f"AI sedang membaca foto, menyusun rute {rute_pilihan} & menghitung jarak dari PT MBS Waru..."):
                 try:
                     list_toko_foto = panggil_ai_vision(image)
                     st.info(f"🔍 **Toko Terdeteksi di Foto oleh AI:** {', '.join(list_toko_foto)}")
@@ -82,7 +88,7 @@ if menu_pilihan == "1. Asisten Kunjungan & Data Histori":
                                     st.write(f"📏 **Estimasi Jarak dari Start (PT MBS Waru):** `{res['txt_jarak']}`")
                                     st.markdown(f"📊 **Status Order:** {res['status_label']}")
                                     
-                                    # Tampilkan Catatan / NOTE jika ada di Google Sheets
+                                    # Tampilkan Catatan / NOTE jika ada
                                     if res.get('catatan'):
                                         st.error(f"📌 **CATATAN TOKO:** {res['catatan']}")
 

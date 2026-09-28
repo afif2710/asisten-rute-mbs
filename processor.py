@@ -10,11 +10,10 @@ from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 
 # ==========================================
-# 1. KONFIGURASI MODEL, TOKEN & SHEET ID
+# 1. KONFIGURASI MODEL & TOKEN
 # ==========================================
 MODEL_AI = "claude-opus-4-6"
 SYLOR_TOKEN = "sk-gnUcoUOQnGcQFgjjiV67FO4Xo179XujuW4FP0xQzRoE8i1Xc"
-SHEET_ID = "1IK85aVNFgbzWHCwua4NWnqRxc_Ce-C0Gn8xhqnxFK8w"
 TITIK_AWAL_MBS = "PT Mensa Bina Sukses Waru Sidoarjo"
 
 # Titik Koordinat Resmi PT Mensa Bina Sukses (Area Waru / Sidoarjo)
@@ -110,9 +109,10 @@ def bersihkan_angka(val):
     except ValueError:
         return 0.0
 
-def load_data_from_google_sheets():
+def load_data_from_google_sheets(sheet_id):
+    """Load data dinamis sesuai Sheet ID yang dikirim dari app.py"""
     try:
-        base_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet="
+        base_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet="
         s_histori = urllib.parse.quote("Data Histori Januari - Juli 2026")
         s_alamat = urllib.parse.quote("Data Alamat Toko")
 
