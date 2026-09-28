@@ -110,19 +110,42 @@ def bersihkan_angka(val):
         return 0.0
 
 def load_data_from_google_sheets(sheet_id):
-    """Load data dinamis sesuai Sheet ID yang dikirim dari app.py"""
+    """Load data dinamis sesuai Sheet ID dengan nama tab fleksibel"""
     try:
         base_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet="
-        s_histori = urllib.parse.quote("Data Histori Januari - Juli 2026")
-        s_alamat = urllib.parse.quote("Data Alamat Toko")
+        
+        # Coba ambil tab histori (apakah bernama 'Data Histori...' atau nama rute seperti 'RS CP-X4')
+        df_histori = None
+        for sheet_name in ["Data Histori Januari - Juli 2026", "RS CP-X4", "RS CP-08"]:
+            try:
+                s_url = base_url + urllib.parse.quote(sheet_name)
+                df_temp = pd.read_csv(s_url, dtype=str)
+                if not df_temp.empty and len(df_temp.columns) > 3:
+                    df_histori = df_temp
+                    break
+            except:
+                continue
 
-        df_histori = pd.read_csv(base_url + s_histori, dtype=str)
-        df_alamat = pd.read_csv(base_url + s_alamat, dtype=str)
+        # Coba ambil tab alamat toko (fleksibel huruf besar/kecil)
+        df_alamat = None
+        for sheet_name in ["Data Alamat Toko", "Data alamat toko"]:
+            try:
+                s_url = base_url + urllib.parse.quote(sheet_name)
+                df_temp = pd.read_csv(s_url, dtype=str)
+                if not df_temp.empty:
+                    df_alamat = df_temp
+                    break
+            except:
+                continue
 
-        cols_to_fill = df_histori.columns[:4]
-        df_histori[cols_to_fill] = df_histori[cols_to_fill].ffill()
+        if df_histori is not None and df_alamat is not None:
+            cols_to_fill = df_histori.columns[:4]
+            df_histori[cols_to_fill] = df_histori[cols_to_fill].ffill()
+            return df_histori, df_alamat
+        else:
+            print("Gagal menemukan nama sheet yang sesuai.")
+            return None, None
 
-        return df_histori, df_alamat
     except Exception as e:
         print(f"Error Load Sheets: {e}")
         return None, None
